@@ -1,25 +1,30 @@
 import logging
 import requests
 import os
+import time
+import threading
+from flask import Flask
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from dotenv import load_dotenv
 
+# 환경 변수 불러오기
 load_dotenv()
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CMC_API_KEY = os.getenv("CMC_API_KEY")
 
+# 로그 설정
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO,
     filename="error.log"
 )
 
+# 환율 캐시
 CACHE = {"price": None, "timestamp": None}
 
 def get_usdt_to_krw():
-    import time
     now = time.time()
     if CACHE["price"] and CACHE["timestamp"] and now - CACHE["timestamp"] < 60:
         return CACHE["price"]
@@ -40,6 +45,7 @@ def get_usdt_to_krw():
         logging.error("Error fetching exchange rate: %s", e)
         return None
 
+# 텔레그램 봇 명령어
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "안녕하세요! 777 EXCHANGE RATE 봇입니다.\n"
@@ -60,10 +66,27 @@ async def price(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("❌ 환율 정보를 가져오지 못했습니다. 나중에 다시 시도해주세요.")
 
-if __name__ == "__main__":
+# 텔레그램 봇 실행 함수
+def run_bot():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("price", price))
     print("🤖 Telegram Bot Started...")
     app.run_polling()
+
+# Flask 서버 설정 (Render용)
+flask_app = Flask(__name__)
+
+@flask_app.route("/")
+def home():
+    return "✅ 777 EXCHANGE RATE 봇이 실행 중입니다."
+
+def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    flask_app.run(host="0.0.0.0", port=port)
+
+# 병렬 실행
+if __name__ == "__main__":
+    threading.Thread(target=run_flask).start()
+    run_bot()
