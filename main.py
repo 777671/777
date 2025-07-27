@@ -2,6 +2,7 @@ import os
 import time
 import logging
 import requests
+import re
 from flask import Flask
 from threading import Thread
 import telebot
@@ -71,12 +72,16 @@ def send_price(message):
     else:
         bot.reply_to(message, "❌ 환율 정보를 불러오지 못했습니다.")
 
-# 일반 메시지 처리 (환율 변환)
-@bot.message_handler(func=lambda m: True)
+# 일반 메시지 처리 (숫자 없는 메시지는 무시)
+@bot.message_handler(func=lambda message: True)
 def convert_currency(message):
-    try:
-        text = message.text.strip().replace(",", "").upper()
+    text = message.text.strip().replace(",", "").upper()
 
+    # 숫자가 포함되지 않은 메시지는 무시
+    if not re.search(r'\d', text):
+        return
+
+    try:
         if "USDT" in text or "테더" in text:
             amount = float(''.join(c for c in text if c.isdigit() or c == '.'))
             rate = get_usdt_price()
@@ -102,7 +107,7 @@ def convert_currency(message):
         logging.error(f"메시지 처리 오류: {e}")
         bot.reply_to(message, "⚠️ 숫자를 포함한 메시지를 입력해 주세요.")
 
-# Flask 서버로 Replit 24시간 실행 유지
+# Flask 서버로 Replit/Render 24시간 실행 유지
 app = Flask('')
 
 @app.route('/')
