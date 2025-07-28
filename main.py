@@ -1,109 +1,114 @@
 import os
 import telebot
 import requests
-import time
-import logging
-from flask import Flask, request
 from dotenv import load_dotenv
+from flask import Flask
 
-# Load environment variables
 load_dotenv()
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-CMC_API_KEY = os.getenv("CMC_API_KEY")
 
-# Logging setup
-logging.basicConfig(level=logging.INFO, filename='error.log', filemode='a', format='%(asctime)s %(levelname)s:%(message)s')
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+CMC_API_KEY = os.getenv("COINMARKETCAP_API_KEY")
 
-# Bot and Flask
-bot = telebot.TeleBot(TOKEN, parse_mode=None)
+bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
 
-# Exchange rate cache
-exchange_cache = {'price': None, 'timestamp': 0}
+cached_price = None
 
-# 도움말 메시지
-HELP_MSG = """📗 777 EXCHANGE RATE 봇 사용법:
-
-• /테더 <숫자>: USDT → 원화 환산
-• /원화 <숫자>: 원화 → USDT 환산
-• /시세 : 실시간 USDT 시세 보기
-• /start, /help : 사용법 보기
-
-※ 모든 명령어는 '/'를 포함해야 합니다"""
-
-# 실시간 시세 가져오기
-def get_price():
+# 시세 조회 함수
+def get_usdt_krw_price():
+    global cached_price
     try:
-        now = time.time()
-        if exchange_cache['price'] and now - exchange_cache['timestamp'] < 60:
-            return exchange_cache['price']
+        url = "https://pro-api.coinmarketcap.com/v1/tools/price-conversion"
+        params = {
+            'amount': 1,
+            'symbol': 'USDT',
+            'convert': 'KRW'
+        }
+        headers = {
+            'Accepts': 'application/json',
+            'X-CMC_PRO_API_KEY': CMC_API_KEY
+        }
 
-        url = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest"
-        params = {"symbol": "USDT", "convert": "KRW"}
-        headers = {"X-CMC_PRO_API_KEY": CMC_API_KEY}
-        response = requests.get(url, params=params, headers=headers)
+        response = requests.get(url, headers=headers, params=params)
+        response.raise_for_status()
         data = response.json()
-        price = data['data']['USDT']['quote']['KRW']['price']
-        exchange_cache['price'] = price
-        exchange_cache['timestamp'] = now
+        price = data['data']['quote']['KRW']['price']
+        cached_price = price
         return price
     except Exception as e:
-        logging.error(f"시세 가져오기 오류: {e}")
-        return None
+        bot.logger.error(f"시세 조회 오류: {e}")
+        return cached_price  # 마지막 성공값 사용
 
-# 텔레그램 명령어 처리
-@bot.message_handler(commands=['start', 'help'])
+# 📗 봇 도움말
+HELP_MSG = (
+    "📗 <b>777 EXCHANGE RATE 봇 사용법:</b>\n\n"
+    "• <code>/테더 숫자</code>: USDT → 원화 환산\n"
+    "• <code>/원화 숫자</code>: 원화 → USDT 환산\n"
+    "• <code>/시세</code>: 실시간 USDT 시세 보기\n"
+    "• <code>/start</code>, <code>/help</code>: 사용법 보기\n\n"
+    "※ 모든 명령어는 '/'를 포함해야 합니다"
+)
+
+@bot.message_handler(commands=["start", "help"])
 def send_help(message):
-    bot.reply_to(message, HELP_MSG)
+    bot.send_message(message.chat.id, HELP_MSG, parse_mode="HTML")
 
-@bot.message_handler(commands=['시세'])
+@bot.message_handler(commands=["시세"])
 def send_price(message):
-    price = get_price()
+    price = get_usdt_krw_price()
     if price:
-        bot.reply_to(message, f"💱 현재 USDT 시세: {price:,.2f}원", parse_mode=None)
+        bot.send_message(message.chat.id, f"💱 1 USDT = {int(price):,} 원")
     else:
-        bot.reply_to(message, "❌ 시세를 가져오는 데 실패했습니다.", parse_mode=None)
+        bot.send_message(message.chat.id, "❌ 시세를 불러오는 데 실패했습니다.")
 
-@bot.message_handler(commands=['테더'])
-def usdt_to_krw(message):
+@bot.message_handler(commands=["테더"])
+def convert_usdt_to_krw(message):
     try:
-        amount = float(message.text.split()[1])
-        price = get_price()
+        parts = message.text.split()
+        if len(parts) != 2:
+            raise ValueError("잘못된 입력")
+
+        amount = float(parts[1])
+        price = get_usdt_krw_price()
         if price:
             result = amount * price
-            bot.reply_to(message, f"💸 {amount} USDT ≈ {result:,.0f} 원", parse_mode=None)
+            bot.send_message(message.chat.id, f"💵 {amount} USDT ≈ {int(result):,} 원")
         else:
-            raise ValueError("가격 없음")
+            bot.send_message(message.chat.id, "❌ 환율 정보를 가져올 수 없습니다.")
     except Exception as e:
-        logging.error(f"테더 변환 오류: {e}")
-        bot.reply_to(message, "❌ 변환 중 오류가 발생했습니다.", parse_mode=None)
+        bot.logger.error(f"테더 변환 오류: {e}")
+        bot.send_message(message.chat.id, "❌ 변환 중 오류가 발생했습니다.")
 
-@bot.message_handler(commands=['원화'])
-def krw_to_usdt(message):
+@bot.message_handler(commands=["원화"])
+def convert_krw_to_usdt(message):
     try:
-        amount = float(message.text.split()[1])
-        price = get_price()
+        parts = message.text.split()
+        if len(parts) != 2:
+            raise ValueError("잘못된 입력")
+
+        amount = float(parts[1])
+        price = get_usdt_krw_price()
         if price:
             result = amount / price
-            bot.reply_to(message, f"💵 {amount:,.0f} 원 ≈ {result:.2f} USDT", parse_mode=None)
+            bot.send_message(message.chat.id, f"💵 {int(amount):,} 원 ≈ {result:.2f} USDT")
         else:
-            raise ValueError("가격 없음")
+            bot.send_message(message.chat.id, "❌ 환율 정보를 가져올 수 없습니다.")
     except Exception as e:
-        logging.error(f"원화 변환 오류: {e}")
-        bot.reply_to(message, "❌ 변환 중 오류가 발생했습니다.", parse_mode=None)
+        bot.logger.error(f"원화 변환 오류: {e}")
+        bot.send_message(message.chat.id, "❌ 변환 중 오류가 발생했습니다.")
 
-# 웹훅용 라우터
-@app.route(f"/{TOKEN}", methods=["POST"])
-def webhook():
-    bot.process_new_updates([telebot.types.Update.de_json(request.stream.read().decode("utf-8"))])
-    return "", 200
+# ================================
+# 🔁 Render용 Flask 엔드포인트 설정
+@app.route("/")
+def home():
+    return "Bot is alive."
 
-# Render에서 실행
 if __name__ == "__main__":
-    if os.getenv("RENDER") == "true":
-        bot.remove_webhook()
-        bot.set_webhook(url=f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/{TOKEN}")
-        app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
-    else:
+    import threading
+
+    def run_bot():
         bot.remove_webhook()
         bot.infinity_polling()
+
+    threading.Thread(target=run_bot).start()
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
