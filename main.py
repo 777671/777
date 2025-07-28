@@ -1,18 +1,18 @@
 import telebot
 import requests
 import os
-from dotenv import load_dotenv
 import time
 
-# .env 파일 로드 (로컬에서만 유효, Render에서는 무시됨)
-load_dotenv()
-
-# 텔레그램 봇 토큰
+# 환경 변수에서 토큰 및 API 키 가져오기
 TOKEN = os.getenv("TELEGRAM_TOKEN")
-bot = telebot.TeleBot(TOKEN)
-
-# CoinMarketCap API 키
 CMC_API_KEY = os.getenv("CMC_API_KEY")
+
+if not TOKEN:
+    raise Exception("❌ TELEGRAM_TOKEN 환경 변수가 정의되지 않았습니다.")
+if not CMC_API_KEY:
+    raise Exception("❌ CMC_API_KEY 환경 변수가 정의되지 않았습니다.")
+
+bot = telebot.TeleBot(TOKEN)
 
 # 캐싱: 마지막 환율 및 시간
 cached_rate = None
@@ -45,7 +45,7 @@ def get_usdt_to_krw():
         print(f"❌ 환율 조회 오류: {e}")
         return None
 
-# 명령어: /테더 <금액>
+# /테더 <금액>
 @bot.message_handler(commands=['테더'])
 def handle_tether_command(message):
     try:
@@ -59,7 +59,7 @@ def handle_tether_command(message):
     except:
         bot.reply_to(message, "❗ 사용법: /테더 <숫자>")
 
-# 명령어: /원화 <금액>
+# /원화 <금액>
 @bot.message_handler(commands=['원화'])
 def handle_krw_command(message):
     try:
@@ -73,7 +73,7 @@ def handle_krw_command(message):
     except:
         bot.reply_to(message, "❗ 사용법: /원화 <숫자>")
 
-# 명령어: /시세
+# /시세
 @bot.message_handler(commands=['시세'])
 def handle_price_command(message):
     rate = get_usdt_to_krw()
@@ -82,7 +82,7 @@ def handle_price_command(message):
     else:
         bot.reply_to(message, "❌ 환율 정보를 가져올 수 없습니다.")
 
-# 명령어: /start, /help
+# /start, /help
 @bot.message_handler(commands=['start', 'help'])
 def handle_help_command(message):
     help_text = (
@@ -101,5 +101,5 @@ def ignore_non_command(message):
     pass
 
 # 봇 실행
-print("✅ 텔레그램 봇 실행 중 (Render 단일 인스턴스용)")
-bot.polling()
+print("✅ 텔레그램 봇 실행 중 (Render용)")
+bot.polling(non_stop=True)
