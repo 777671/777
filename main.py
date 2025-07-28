@@ -3,26 +3,19 @@ import requests
 import os
 import time
 
-# 환경 변수에서 토큰 및 API 키 가져오기
+# 환경 변수에서 토큰 읽기 (Render의 Environment 탭에서 설정한 키 이름 사용)
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CMC_API_KEY = os.getenv("CMC_API_KEY")
 
-if not TOKEN:
-    raise Exception("❌ TELEGRAM_TOKEN 환경 변수가 정의되지 않았습니다.")
-if not CMC_API_KEY:
-    raise Exception("❌ CMC_API_KEY 환경 변수가 정의되지 않았습니다.")
-
 bot = telebot.TeleBot(TOKEN)
 
-# 캐싱: 마지막 환율 및 시간
 cached_rate = None
 last_updated = 0
 
-# USDT → KRW 환율 가져오기
 def get_usdt_to_krw():
     global cached_rate, last_updated
     now = time.time()
-    if cached_rate is not None and now - last_updated < 300:
+    if cached_rate and now - last_updated < 300:
         return cached_rate
 
     url = "https://pro-api.coinmarketcap.com/v1/tools/price-conversion"
@@ -42,10 +35,9 @@ def get_usdt_to_krw():
         last_updated = now
         return price
     except Exception as e:
-        print(f"❌ 환율 조회 오류: {e}")
+        print(f"❌ 환율 조회 실패: {e}")
         return None
 
-# /테더 <금액>
 @bot.message_handler(commands=['테더'])
 def handle_tether_command(message):
     try:
@@ -59,7 +51,6 @@ def handle_tether_command(message):
     except:
         bot.reply_to(message, "❗ 사용법: /테더 <숫자>")
 
-# /원화 <금액>
 @bot.message_handler(commands=['원화'])
 def handle_krw_command(message):
     try:
@@ -73,7 +64,6 @@ def handle_krw_command(message):
     except:
         bot.reply_to(message, "❗ 사용법: /원화 <숫자>")
 
-# /시세
 @bot.message_handler(commands=['시세'])
 def handle_price_command(message):
     rate = get_usdt_to_krw()
@@ -82,7 +72,6 @@ def handle_price_command(message):
     else:
         bot.reply_to(message, "❌ 환율 정보를 가져올 수 없습니다.")
 
-# /start, /help
 @bot.message_handler(commands=['start', 'help'])
 def handle_help_command(message):
     help_text = (
@@ -95,11 +84,9 @@ def handle_help_command(message):
     )
     bot.reply_to(message, help_text)
 
-# 그 외 메시지 무시
 @bot.message_handler(func=lambda m: True)
 def ignore_non_command(message):
     pass
 
-# 봇 실행
-print("✅ 텔레그램 봇 실행 중 (Render용)")
+print("✅ 봇이 Render에서 실행 중입니다.")
 bot.polling(non_stop=True)
