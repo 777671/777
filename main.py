@@ -2,11 +2,13 @@ import telebot
 import requests
 import os
 from dotenv import load_dotenv
+import time
 
+# .env 파일 로드 (로컬에서만 유효, Render에서는 무시됨)
 load_dotenv()
 
 # 텔레그램 봇 토큰
-TOKEN = os.getenv("BOT_TOKEN")
+TOKEN = os.getenv("TELEGRAM_TOKEN")
 bot = telebot.TeleBot(TOKEN)
 
 # CoinMarketCap API 키
@@ -19,7 +21,6 @@ last_updated = 0
 # USDT → KRW 환율 가져오기
 def get_usdt_to_krw():
     global cached_rate, last_updated
-    import time
     now = time.time()
     if cached_rate is not None and now - last_updated < 300:
         return cached_rate
@@ -100,5 +101,5 @@ def ignore_non_command(message):
     pass
 
 # 봇 실행
-print("✅ 텔레그램 봇 실행 중 (Render용 단일 실행)")
-bot.polling(non_stop=True)
+print("✅ 텔레그램 봇 실행 중 (Render 단일 인스턴스용)")
+bot.polling()
