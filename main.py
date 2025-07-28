@@ -1,92 +1,122 @@
-import telebot
-import requests
 import os
+import logging
+import requests
+import telebot
 import time
+from flask import Flask
 
-# 환경 변수에서 토큰 읽기 (Render의 Environment 탭에서 설정한 키 이름 사용)
-TOKEN = os.getenv("TELEGRAM_TOKEN")
+# 환경 변수 로딩 (Render 환경에서 설정됨)
 CMC_API_KEY = os.getenv("CMC_API_KEY")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
-bot = telebot.TeleBot(TOKEN)
+# 로깅 설정
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger()
 
-cached_rate = None
-last_updated = 0
+# 유효성 검사
+if not TELEGRAM_TOKEN or not CMC_API_KEY:
+    raise ValueError("TELEGRAM_TOKEN 또는 CMC_API_KEY가 설정되지 않았습니다.")
 
-def get_usdt_to_krw():
-    global cached_rate, last_updated
-    now = time.time()
-    if cached_rate and now - last_updated < 300:
-        return cached_rate
+# 텔레그램 봇 초기화
+bot = telebot.TeleBot(TELEGRAM_TOKEN, parse_mode="HTML")
 
-    url = "https://pro-api.coinmarketcap.com/v1/tools/price-conversion"
-    params = {
-        'amount': 1,
-        'symbol': 'USDT',
-        'convert': 'KRW'
-    }
+# 캐시 설정
+cache = {}
+CACHE_TTL = 10  # 초 단위
+
+# 📗 사용법 텍스트
+HELP_TEXT = """📗 777 EXCHANGE RATE 봇 사용법:
+
+• /테더 <숫자>: USDT → 원화 환산
+• /원화 <숫자>: 원화 → USDT 환산
+• /시세 : 실시간 USDT 시세 보기
+• /start, /help : 사용법 보기
+
+※ 모든 명령어는 '/'를 포함해야 합니다"""
+
+# 실시간 시세 가져오기
+def get_usdt_krw_price():
+    now = int(time.time())
+    if 'timestamp' in cache and now - cache['timestamp'] < CACHE_TTL:
+        return cache['price']
+    url = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest"
+    params = {'symbol': 'USDT', 'convert': 'KRW'}
     headers = {'X-CMC_PRO_API_KEY': CMC_API_KEY}
+    response = requests.get(url, params=params, headers=headers)
+    data = response.json()
+    price = data['data']['USDT']['quote']['KRW']['price']
+    cache['timestamp'] = now
+    cache['price'] = price
+    return price
 
-    try:
-        response = requests.get(url, params=params, headers=headers)
-        response.raise_for_status()
-        data = response.json()
-        price = data['data']['quote']['KRW']['price']
-        cached_rate = price
-        last_updated = now
-        return price
-    except Exception as e:
-        print(f"❌ 환율 조회 실패: {e}")
-        return None
-
-@bot.message_handler(commands=['테더'])
-def handle_tether_command(message):
-    try:
-        amount = float(message.text.split()[1])
-        rate = get_usdt_to_krw()
-        if rate:
-            krw = round(amount * rate, 2)
-            bot.reply_to(message, f"💵 {amount} USDT → ￦{krw:,} 원")
-        else:
-            bot.reply_to(message, "❌ 환율 정보를 가져올 수 없습니다.")
-    except:
-        bot.reply_to(message, "❗ 사용법: /테더 <숫자>")
-
-@bot.message_handler(commands=['원화'])
-def handle_krw_command(message):
-    try:
-        amount = float(message.text.split()[1])
-        rate = get_usdt_to_krw()
-        if rate:
-            usdt = round(amount / rate, 2)
-            bot.reply_to(message, f"💰 ￦{amount:,} 원 → {usdt} USDT")
-        else:
-            bot.reply_to(message, "❌ 환율 정보를 가져올 수 없습니다.")
-    except:
-        bot.reply_to(message, "❗ 사용법: /원화 <숫자>")
-
-@bot.message_handler(commands=['시세'])
-def handle_price_command(message):
-    rate = get_usdt_to_krw()
-    if rate:
-        bot.reply_to(message, f"💱 현재 1 USDT = ￦{round(rate, 2):,} 원")
-    else:
-        bot.reply_to(message, "❌ 환율 정보를 가져올 수 없습니다.")
-
+# /start 또는 /help 명령어 처리
 @bot.message_handler(commands=['start', 'help'])
-def handle_help_command(message):
-    help_text = (
-        "🪙 777 EXCHANGE RATE 봇 사용법:\n\n"
-        "• /테더 <숫자>: USDT → 원화 환산\n"
-        "• /원화 <숫자>: 원화 → USDT 환산\n"
-        "• /시세 : 실시간 USDT 시세 보기\n"
-        "• /start, /help : 사용법 보기\n\n"
-        "※ 모든 명령어는 '/'를 포함해야 합니다!"
-    )
-    bot.reply_to(message, help_text)
+def handle_start_help(message):
+    bot.reply_to(message, HELP_TEXT)
 
-@bot.message_handler(func=lambda m: True)
+# /시세 명령어 처리
+@bot.message_handler(commands=['시세'])
+def handle_price(message):
+    try:
+        price = get_usdt_krw_price()
+        text = f"💱 실시간 시세: <b>{price:,.2f}₩</b> (1 USDT)"
+        bot.reply_to(message, text)
+    except Exception as e:
+        logger.error("시세 조회 오류: %s", e)
+        bot.reply_to(message, "❌ 시세 정보를 가져오는 중 오류가 발생했습니다.")
+
+# /테더 <숫자> : USDT → 원화
+@bot.message_handler(commands=['테더'])
+def handle_tether(message):
+    try:
+        parts = message.text.strip().split()
+        if len(parts) != 2:
+            return bot.reply_to(message, "❗ 사용법: /테더 <숫자>")
+        amount = float(parts[1])
+        price = get_usdt_krw_price()
+        result = amount * price
+        bot.reply_to(message, f"💸 {amount} USDT ≈ <b>{result:,.0f}₩</b>")
+    except Exception as e:
+        logger.error("테더 변환 오류: %s", e)
+        bot.reply_to(message, "❌ 변환 중 오류가 발생했습니다.")
+
+# /원화 <숫자> : 원화 → USDT
+@bot.message_handler(commands=['원화'])
+def handle_krw(message):
+    try:
+        parts = message.text.strip().split()
+        if len(parts) != 2:
+            return bot.reply_to(message, "❗ 사용법: /원화 <숫자>")
+        amount = float(parts[1])
+        price = get_usdt_krw_price()
+        result = amount / price
+        bot.reply_to(message, f"💵 {amount:,.0f}₩ ≈ <b>{result:.2f} USDT</b>")
+    except Exception as e:
+        logger.error("원화 변환 오류: %s", e)
+        bot.reply_to(message, "❌ 변환 중 오류가 발생했습니다.")
+
+# 명령어 이외는 무시
+@bot.message_handler(func=lambda m: not m.text.startswith('/'))
 def ignore_non_command(message):
     pass
 
-print("✅ 봇이 Render에서 실행 중입니다.")
-bot.polling(non_stop=True)
+# Flask 앱 (Render용)
+app = Flask(__name__)
+
+@app.route('/')
+def index():
+    return "777 EXCHANGE RATE 봇이 실행 중입니다!"
+
+# 진입점
+if __name__ == "__main__":
+    from threading import Thread
+
+    def run_bot():
+        logger.info("🤖 Telegram 봇 시작됨")
+        bot.infinity_polling()
+
+    def run_web():
+        app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+
+    Thread(target=run_bot).start()
+    Thread(target=run_web).start()
