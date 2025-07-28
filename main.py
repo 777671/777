@@ -5,8 +5,9 @@ import logging
 from flask import Flask
 import telebot
 from dotenv import load_dotenv
+from threading import Thread
 
-# 환경변수 로드
+# .env 파일에서 환경 변수 불러오기
 load_dotenv()
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -18,10 +19,11 @@ app = Flask(__name__)
 # 로깅 설정
 logging.basicConfig(filename='error.log', level=logging.ERROR)
 
-# 환율 캐시
+# 환율 캐시 설정
 exchange_cache = {"rate": None, "timestamp": 0}
-CACHE_TTL = 60  # 초 단위 캐시 유효 시간
+CACHE_TTL = 60  # 캐시 유효 시간 (초)
 
+# 환율 가져오기 함수
 def get_usdt_to_krw():
     try:
         now = time.time()
@@ -41,30 +43,30 @@ def get_usdt_to_krw():
 
         response = requests.get(url, headers=headers, params=params)
         data = response.json()
-
         rate = data["data"]["quote"]["KRW"]["price"]
+
         exchange_cache["rate"] = rate
         exchange_cache["timestamp"] = now
-
         return rate
+
     except Exception as e:
         logging.error(f"[환율 요청 오류] {e}")
         return None
 
-# 사용법 안내 텍스트
-HELP_TEXT = (
-    "📗 777 EXCHANGE RATE 봇 사용법:\n\n"
-    "• /테더 <숫자>: USDT → 원화 환산\n"
-    "• /원화 <숫자>: 원화 → USDT 환산\n"
-    "• /시세 : 실시간 USDT 시세 보기\n"
-    "• /start, /help : 사용법 보기\n\n"
-    "※ 모든 명령어는 '/'를 포함해야 합니다!"
-)
-
+# /start, /help 명령어
 @bot.message_handler(commands=["start", "help"])
 def send_help(message):
-    bot.send_message(message.chat.id, HELP_TEXT)
+    text = (
+        "📗 777 EXCHANGE RATE 봇 사용법:\n\n"
+        "• /테더 <숫자>: USDT → 원화 환산\n"
+        "• /원화 <숫자>: 원화 → USDT 환산\n"
+        "• /시세 : 실시간 USDT 시세 보기\n"
+        "• /start, /help : 사용법 보기\n\n"
+        "※ 모든 명령어는 '/'를 포함해야 합니다!"
+    )
+    bot.send_message(message.chat.id, text)
 
+# /시세 명령어
 @bot.message_handler(commands=["시세"])
 def send_price(message):
     try:
@@ -77,6 +79,7 @@ def send_price(message):
         logging.error(f"[시세 처리 오류] {e}")
         bot.send_message(message.chat.id, "❌ 처리 중 오류가 발생했습니다.")
 
+# /테더 <숫자>
 @bot.message_handler(commands=["테더"])
 def convert_usdt_to_krw(message):
     try:
@@ -97,6 +100,7 @@ def convert_usdt_to_krw(message):
         logging.error(f"[테더 변환 오류] {e}")
         bot.send_message(message.chat.id, "❌ 숫자 입력 형식을 확인해 주세요.")
 
+# /원화 <숫자>
 @bot.message_handler(commands=["원화"])
 def convert_krw_to_usdt(message):
     try:
@@ -117,19 +121,21 @@ def convert_krw_to_usdt(message):
         logging.error(f"[원화 변환 오류] {e}")
         bot.send_message(message.chat.id, "❌ 숫자 입력 형식을 확인해 주세요.")
 
-# 일반 텍스트는 무시 (명령어만 처리)
-# 따라서 슬래시 없는 입력은 반응하지 않음
+# ❌ 기타 모든 일반 메시지 무시
+@bot.message_handler(func=lambda m: True)
+def ignore_non_commands(message):
+    return  # 아무 응답도 하지 않음
 
-# Flask 서버 (UptimeRobot용 ping)
+# Flask 서버 (UptimeRobot 유지용)
 @app.route('/')
 def home():
     return "봇이 실행 중입니다."
 
-# 텔레그램 봇 실행
+# 봇 실행 함수
 def start_bot():
     bot.polling(non_stop=True)
 
+# 실행
 if __name__ == "__main__":
-    from threading import Thread
     Thread(target=start_bot).start()
     app.run(host="0.0.0.0", port=8080)
